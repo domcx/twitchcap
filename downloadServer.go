@@ -1,4 +1,4 @@
-package twitch
+package twitchcap
 
 type downloadServer struct {
 	Name, Type, Playlist, Base string

@@ -1,4 +1,4 @@
-package twitch
+package twitchcap
 
 type tsFile struct {
 	Name, Location string

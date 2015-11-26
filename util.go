@@ -1,4 +1,4 @@
-package twitch
+package twitchcap
 import (
 "io/ioutil"
 "net/http"
