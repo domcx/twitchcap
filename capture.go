@@ -62,7 +62,7 @@ func (c *Capture) FindFiles(count, rank int) error {
 	var server *downloadServer = nil
 	for _, ds := range c.servers {
 		if ds.Rank == rank {
-			server = ds
+			server = &ds
 		}
 	}
 	if server == nil {
