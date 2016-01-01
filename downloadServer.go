@@ -18,6 +18,8 @@ func resolve(url string) (downloadServer) {
 		ds.Rank = 3
 	case "low":
 		ds.Rank = 4
+	case "mobile":
+		ds.Rank = 5
 	}
 	return ds
 }

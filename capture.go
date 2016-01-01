@@ -63,6 +63,7 @@ func (c *Capture) FindFiles(count, rank int) error {
 	for _, ds := range c.servers {
 		if ds.Rank == rank {
 			server = &ds
+			break
 		}
 	}
 	if server == nil {
