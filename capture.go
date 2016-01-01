@@ -58,16 +58,19 @@ func (c *Capture) findServers() (error) {
 	return err
 }
 
-func (c *Capture) FindFiles(count int) {
+func (c *Capture) FindFiles(count, rank int) error {
 	var server *downloadServer = nil
 	for _, ds := range c.servers {
-		if server == nil || ds.Rank < server.Rank {
-			server = &ds;
-			break
+		if ds.Rank == rank {
+			server = ds
 		}
+	}
+	if server == nil {
+		return errors.New("Could not find a server to stream from at the 'rank' you wanted. Did you use 1-4?")
 	}
 	c.files = make(chan tsFile, count)
 	go c.seek(server, count)
+	return nil
 }
 
 func (c *Capture) seek(server *downloadServer, count int) {
