@@ -1,9 +1,8 @@
 package twitchcap
 import (
-	"encoding/json"
 	"errors"
-	"time"
 	"fmt"
+	"github.com/arrowsio/twitchcap/m3u"
 )
 
 type accessToken struct {
@@ -14,100 +13,92 @@ type accessToken struct {
 }
 
 type Capture struct {
-	streamer   string
-	servers    []downloadServer
-	token      *accessToken
-	files      chan tsFile
-	downloaded map[string]struct{}
+	source          string
+	token           *accessToken
+	downloaded      map[string]struct{}
+	playlist        *m3u.M3U
+	isVod           bool
+	stopDownloading bool
 }
 
-func NewCapture(streamer string) (*Capture, error) {
-	var err error = nil
-	if body, err := read("https://api.twitch.tv/api/channels/" + streamer + "/access_token?as3=t"); err == nil {
-		tk := accessToken{}
-		if err = json.Unmarshal(body, &tk); err == nil {
-			if tk.Token == "" {
-				return nil, errors.New("User is not streaming.")
-			}
-			cap := Capture{streamer: streamer, token:&tk}
-			cap.downloaded = make(map[string]struct{})
-			if err = cap.findServers(); err == nil {
-				return &cap, nil
-			}
-		}
-	}
-	return nil, err
+func New() *Capture {
+	return &Capture{downloaded: make(map[string]struct{})}
 }
 
-func (c *Capture) findServers() (error) {
-	c.servers = make([]downloadServer, 0)
-	var err error = nil
-	uri := "http://usher.twitch.tv/api/channel/hls/" +
-	c.streamer + ".m3u8?allow_spectre=true&token=" +
-	c.token.Token + "&player=twitchweb&sig=" + c.token.Sig + "&allow_source=true"
-	if body, err := read(uri); err == nil {
-		//Get available sources
-		matches := anyUrl.FindAllString(string(body), -1)
-		for _, uri := range matches {
-			c.servers = append(c.servers, resolve(uri))
-		}
-		if len(c.servers) <= 0 {
-			return errors.New("No sutable download stream found.")
-		}
-	}
-	return err
+func (c *Capture) CaptureStream(streamer string) error {
+	c.source = streamer
+	return c.init("https://api.twitch.tv/api/channels/" + streamer + "/access_token?as3=t")
 }
 
-func (c *Capture) FindFiles(count, rank int) error {
-	var server *downloadServer = nil
-	for _, ds := range c.servers {
-		if ds.Rank == rank {
-			server = &ds
-			break
-		}
+func (c *Capture) CaptureVod(vod string) error {
+	c.source = vod
+	c.isVod = true
+	return c.init("https://api.twitch.tv/api/vods/" + vod + "/access_token?as3=t")
+}
+
+func (c *Capture) init(url string) error {
+	c.token = &accessToken{}
+	if err := readJson(url, &c.token); err != nil {
+		return err
 	}
-	if server == nil {
-		return errors.New("Could not find a server to stream from at the 'rank' you wanted. Did you use 1-4?")
+	if c.token.Token == "" {
+		return errors.New("Unable to obtain streaming token.")
 	}
-	c.files = make(chan tsFile, count)
-	go c.seek(server, count)
 	return nil
 }
 
-func (c *Capture) seek(server *downloadServer, count int) {
-	defer close(c.files)
-	sent, errs := 0, 0
-	for sent < count && errs < 3 {
-		if body, err := server.readPlaylist(); err == nil {
-			for _, s := range simpleTs.FindAllString(string(body), -1) {
-				if _, y := c.downloaded[s]; y || sent >= count {
-					continue
-				}
-				tsf := tsFile{Name:s, Location:server.Base + server.Type + "/" + s}
-
-				c.files <- tsf
-				c.downloaded[tsf.Name] = struct{}{}
-				sent++
-			}
-		} else {
-			fmt.Println(err)
-			errs++
-		}
-		time.Sleep(3 * time.Second)
+func (c *Capture) FindStream(rank int) (error) {
+	var uri string
+	if c.isVod {
+		uri = fmt.Sprintf("http://usher.twitch.tv/vod/%v?allow_spectre=true&nauth=%v&player=twitchweb&nauthsig=%v&allow_source=true", c.source, c.token.Token, c.token.Sig)
+	} else {
+		uri = fmt.Sprintf("http://usher.twitch.tv/api/channel/hls/%v.m3u8?token=%v&allow_source=true&player=twitchweb&sig=%v&allow_spectre=true", c.source, c.token.Token, c.token.Sig)
 	}
+	m := m3u.Import(uri)
+	if err := m.Read(); err != nil {
+		return err
+	}
+	for _, stream := range m.PlayLists {
+		if stream.Rank == rank {
+			c.playlist = m3u.Import(stream.Location)
+			return nil
+		}
+	}
+	return errors.New("Stream with that ranking not found.")
 }
 
-func (c *Capture) Download() chan []byte {
-	dc := make(chan []byte)
+func (c *Capture) Stop() {
+	c.stopDownloading = true
+}
+
+func (c *Capture) Download(timeout float32) (chan []byte, chan error) {
+	buf := make(chan []byte, 15)
+	errBuf := make(chan error, 15)
+	c.stopDownloading = false
 	go func() {
-		buf := make([]byte, 0)
-		for tsf := range c.files {
-			if bytes, err := tsf.download(); err == nil {
-				buf = append(buf, bytes...)
+		defer close(buf)
+		var elapsed float32 = 0.0
+		for elapsed < timeout && !c.stopDownloading {
+			if err := c.playlist.Read(); err != nil {
+				errBuf <- err
+			}
+			for _, part := range c.playlist.Parts {
+				if elapsed >= timeout || c.stopDownloading {
+					break
+				}
+				if err := c.playlist.Read(); err != nil {
+					errBuf <- err
+					break
+				}
+				if data, err := readRaw(part.Path); err == nil {
+					buf <- data
+				} else {
+					errBuf <- err
+				}
+				elapsed += part.Length
+				fmt.Println(elapsed)
 			}
 		}
-		dc <- buf
-		close(dc)
 	}()
-	return dc
+	return buf, errBuf
 }

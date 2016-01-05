@@ -1,21 +1,32 @@
 package twitchcap
 import (
-"io/ioutil"
-"net/http"
-	"regexp"
+	"io/ioutil"
+	"net/http"
+	"encoding/json"
 )
 
-var (
-	anyUrl = regexp.MustCompile("http.?:\\/\\/.+")
-	simpleTs = regexp.MustCompile(".+\\.ts")
-	urlInfo = regexp.MustCompile(`^(.+)/(.+)/py-index-live.m3u8?.+nname=(.+)[,|$].+`)
+const (
+	R_Source = 1
+	R_High = 2
+	R_Medium = 3
+	R_Low = 4
+	R_Mobile = 5
 )
 
-func read(url string) ([]byte, error) {
-	var err error = nil
-	if resp, err := http.Get(url); err == nil {
-		defer resp.Body.Close()
-		return ioutil.ReadAll(resp.Body)
+func readRaw(url string) ([]byte, error) {
+	resp, err := http.Get(url)
+	defer resp.Body.Close()
+	if err != nil {
+		return nil, err
 	}
-	return nil, err
+	return ioutil.ReadAll(resp.Body)
+}
+
+func readJson(url string, v interface{}) (error) {
+	resp, err := http.Get(url)
+	defer resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	return json.NewDecoder(resp.Body).Decode(v)
 }
