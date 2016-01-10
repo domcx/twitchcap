@@ -53,7 +53,7 @@ func (this *M3U) Read() error {
 	// Interpret
 	for scanner.Scan() {
 		line := scanner.Text()
-		if line[0] == '#' {
+		if len(line) > 0 && line[0] == '#' {
 			if len(line) < 8 {
 				continue
 			}
@@ -112,10 +112,31 @@ func (this *M3U) media(scanner *bufio.Scanner) {
 }
 
 func toMap(data string, buf map[string]string) map[string]string {
-	a := strings.Split(data, ",")
-	for _, data := range a {
-		b := strings.Split(data, "=")
-		buf[strings.ToUpper(b[0])] = strings.Replace(b[1], "\"", "", -1)
+	data += ","
+	name := ""
+	skip, quotes := false, false
+	from := 0
+	for i, c := range data {
+		if c == '"' {
+			quotes = true
+			skip = !skip
+		}
+		if skip {
+			continue
+		}
+		if c == '=' {
+			name = data[from:i]
+			from = i + 1
+		}
+		if c == ',' {
+			if quotes {
+				buf[name] = data[from+1:i-1]
+				quotes = false
+			} else {
+				buf[name] = data[from:i]
+			}
+			from = i + 1
+		}
 	}
 	return buf
 }

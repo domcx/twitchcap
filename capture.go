@@ -3,6 +3,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/arrowsio/twitchcap/m3u"
+	"strconv"
+	"strings"
 )
 
 type accessToken struct {
@@ -47,6 +49,8 @@ func (c *Capture) init(url string) error {
 	return nil
 }
 
+// Find the playlist with the stream with the required rank
+// PLEASE NOTE THAT IF YOUR NETWORK CANNOT HANDLE THE DOWNLOAD, SOME CHUNKS OF VIDEO WILL BE LOST.
 func (c *Capture) FindStream(rank int) (error) {
 	var uri string
 	if c.isVod {
@@ -67,36 +71,60 @@ func (c *Capture) FindStream(rank int) (error) {
 	return errors.New("Stream with that ranking not found.")
 }
 
+// Stop downloading
 func (c *Capture) Stop() {
 	c.stopDownloading = true
 }
 
+// Download from the stream until video length EQUALS OR EXCEEDS the timeout requested.
 func (c *Capture) Download(timeout float32) (chan []byte, chan error) {
-	buf := make(chan []byte, 15)
-	errBuf := make(chan error, 15)
+	buf := make(chan []byte, 5)
+	parts := make(chan m3u.M3UPart, 25)
+	errBuf := make(chan error, 5)
 	c.stopDownloading = false
 	go func() {
 		defer close(buf)
-		var elapsed float32 = 0.0
-		for elapsed < timeout && !c.stopDownloading {
-			if err := c.playlist.Read(); err != nil {
-				errBuf <- err
-			}
-			for _, part := range c.playlist.Parts {
-				if elapsed >= timeout || c.stopDownloading {
-					break
-				}
+		defer close(errBuf)
+		// Find the ts files
+		go func() {
+			defer close(parts)
+			var timeDownloaded float32 = 0
+			var last uint32 = 0
+			for timeDownloaded < timeout && !c.stopDownloading {
 				if err := c.playlist.Read(); err != nil {
+					// In this instance it is most likely that the streamer is no longer streaming, or a VOD no longer exists
 					errBuf <- err
-					break
+					return
 				}
-				if data, err := readRaw(part.Path); err == nil {
-					buf <- data
-				} else {
-					errBuf <- err
+				for _, part := range c.playlist.Parts {
+					if timeDownloaded >= timeout || c.stopDownloading {
+						return
+					}
+					// Make sure we don't already have this file (uses the index-0000000000-, as uint32 in case of overflow)
+					s := part.File[6:16]
+					if c.isVod {
+						s = strings.Split(part.File, "end_offset=")[1]
+					}
+					if u, err := strconv.ParseUint(s, 10, 32); err != nil {
+						errBuf <- err
+					} else {
+						//If we already have this file, skip it
+						if last != 0 && uint32(u) <= last {
+							continue
+						}
+						last = uint32(u)
+					}
+					parts <- part
+					timeDownloaded += part.Length
 				}
-				elapsed += part.Length
-				fmt.Println(elapsed)
+			}
+		}()
+		for part := range parts {
+			// Read the input file.
+			if data, err := readRaw(part.Path); err == nil {
+				buf <- data
+			} else {
+				errBuf <- err
 			}
 		}
 	}()
