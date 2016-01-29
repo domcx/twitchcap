@@ -1,6 +1,6 @@
 package main
 import (
-	"github.com/arrowsio/twitchcap"
+	"github.com/pranked/twitchcap"
 	"fmt"
 	"os"
 )

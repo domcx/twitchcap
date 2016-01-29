@@ -2,13 +2,25 @@
 Capture twitch moments
 
 ```go
-
-  user := "STREAMER"
-  cap, err := twitchcap.NewCapture(user)
-  if err != nil {
-    panic(err)
-  }
-  cap.FindFiles(7) // Number of .ts files you want it to record in succession.
-  buf := <-cap.Download() // Wait for the download channel to close, giving us the bytes of the raw video.
-  ioutil.WriteFile("myvideo.ts", buf, 0644) //Now do whatever you want with the bytes?
+	c := twitchcap.New()
+	//Select source
+	if err := c.CaptureVod("34138940"); err != nil {
+		panic(err)
+	}
+	if err := c.FindStream(twitchcap.R_Source); err != nil {
+		panic(err)
+	}
+	fmt.Println("Starting download...")
+	//Maybe we save it?
+	file, err := os.OpenFile("/tmp/vod.ts", os.O_APPEND | os.O_RDWR | os.O_CREATE, 0644)
+	defer file.Close()
+	if err != nil {
+		panic(err)
+	}
+	//Download time in seconds, approximate
+	buf, _ := c.Download(60)
+	//Each part of the stream gets sent here
+	for b := range buf {
+		file.Write(b)
+	}
 ```

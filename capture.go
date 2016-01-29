@@ -2,7 +2,7 @@ package twitchcap
 import (
 	"errors"
 	"fmt"
-	"github.com/arrowsio/twitchcap/m3u"
+	"github.com/pranked/twitchcap/m3u"
 	"strconv"
 	"strings"
 )
